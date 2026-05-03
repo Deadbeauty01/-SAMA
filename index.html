@@ -1,0 +1,1233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>互动地图 | 剧情攻略</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      background: #0b0d17;
+      color: #e0e0e0;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    .map-viewport {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+      background: #1a1e2b;
+      cursor: grab;
+    }
+    .map-viewport:active {
+      cursor: grabbing;
+    }
+    .coord-display {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      background: rgba(0,0,0,0.8);
+      color: #ffbb2e;
+      padding: 8px 15px;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 14px;
+      z-index: 100;
+      pointer-events: none;
+      border: 1px solid #ffbb2e;
+    }
+    .map-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 1024px;
+      height: 1024px;
+      transform-origin: 0 0;
+      will-change: transform;
+      backface-visibility: hidden;
+      background-image: url('Images/background.png');
+      background-size: 100% 100%;
+      background-position: center;
+      background-repeat: no-repeat;
+    }
+    .map-container::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: 
+        linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+      background-size: 50px 50px;
+      pointer-events: none;
+    }
+
+    .marker {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      cursor: pointer;
+      z-index: 10;
+      transition: filter 0.2s, opacity 0.3s;
+      filter: drop-shadow(0 2px 6px rgba(0,0,0,0.6));
+    }
+    .marker:hover {
+      filter: drop-shadow(0 0 10px #ffbb2e) brightness(1.3);
+      z-index: 20;
+    }
+    .marker-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      backdrop-filter: blur(4px);
+      box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+      transition: all 0.2s;
+      border: 2px solid rgba(255,255,255,0.3);
+    }
+    .marker-icon.cat-task-props { background: rgba(255, 107, 53, 0.85); }
+    .marker-icon.cat-task-locations { background: rgba(72, 187, 120, 0.85); }
+    .marker-icon.cat-armory { background: rgba(237, 100, 166, 0.85); width: 28px; height: 28px; }
+    .marker-icon.cat-armory img { width: 70%; height: 70%; object-fit: contain; }
+    .marker-icon.cat-workbench { background: rgba(99, 179, 237, 0.85); width: 28px; height: 28px; }
+    .marker-icon.cat-workbench img { width: 70%; height: 70%; object-fit: contain; }
+    .marker-icon.cat-fishing-rod { background: rgba(129, 230, 217, 0.85); }
+    .marker-icon.cat-fishing-spot { background: rgba(69, 104, 220, 0.85); }
+    .marker-icon.cat-container { background: rgba(177, 140, 242, 0.85); }
+    .marker-icon.cat-wall-weapon { background: rgba(247, 194, 54, 0.55); width: 24px; height: 24px; font-size: 12px; border-width: 1.5px; }
+    .marker.hidden-marker {
+      opacity: 0;
+      pointer-events: none;
+    }
+    
+    .marker.visible-marker {
+      animation: pulse 1s ease-in-out 3;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 0 0 rgba(255, 187, 46, 0.7); }
+      50% { transform: translate(-50%, -50%) scale(1.2); box-shadow: 0 0 0 10px rgba(255, 187, 46, 0); }
+    }
+
+    .sidebar {
+      width: 400px;
+      background: rgba(18, 22, 33, 0.95);
+      backdrop-filter: blur(15px);
+      border-left: 1px solid #2a3142;
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      overflow-x: hidden;
+      box-shadow: -5px 0 20px rgba(0,0,0,0.5);
+      z-index: 30;
+      scrollbar-width: thin;
+      scrollbar-color: #3a4155 #1a1e2b;
+      position: relative;
+    }
+    .watermark {
+      position: absolute;
+      top: 10px;
+      right: 15px;
+      color: rgba(255, 187, 46, 0.5);
+      font-size: 12px;
+      font-weight: bold;
+      z-index: 100;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    .sidebar::-webkit-scrollbar {
+      width: 8px;
+    }
+    .sidebar::-webkit-scrollbar-track {
+      background: #1a1e2b;
+    }
+    .sidebar::-webkit-scrollbar-thumb {
+      background: #3a4155;
+      border-radius: 4px;
+    }
+
+    .sidebar-section {
+      padding: 18px 20px;
+      border-bottom: 1px solid #2a3142;
+    }
+    .section-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #ccd6f6;
+      margin-bottom: 14px;
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .key-points-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .key-point-item {
+      background: #1e2332;
+      border-left: 3px solid #ffbb2e;
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: #cbd5e0;
+    }
+    .key-point-item .kp-title {
+      font-weight: 700;
+      color: #ffbb2e;
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .key-point-item .kp-content {
+      color: #b0bec5;
+      font-size: 12px;
+    }
+
+    .tag-tree {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .tag-category {
+      margin-bottom: 0;
+    }
+    .category-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      background: #232838;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      color: #b0bec5;
+      transition: all 0.2s;
+      font-size: 14px;
+      border: 1px solid transparent;
+    }
+    .category-header:hover {
+      background: #2f364b;
+      color: #e0e0e0;
+    }
+    .category-header.active {
+      background: #2a3a5e;
+      color: #ffbb2e;
+      border-color: #ffbb2e;
+    }
+    .arrow {
+      font-size: 12px;
+      transition: transform 0.2s;
+      color: #6b7a90;
+    }
+    .category-header.expanded .arrow {
+      transform: rotate(90deg);
+    }
+    .category-header.no-expand .arrow {
+      display: none;
+    }
+    .subcategory-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 0;
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.3s ease, padding 0.3s, opacity 0.3s;
+      opacity: 0;
+    }
+    .subcategory-list.show {
+      max-height: 600px;
+      padding: 10px 0 10px 20px;
+      opacity: 1;
+    }
+    .sub-tag {
+      padding: 5px 12px;
+      background: #1e2332;
+      border: 1px solid #3a4155;
+      border-radius: 20px;
+      font-size: 12px;
+      cursor: pointer;
+      color: #b0bec5;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    .sub-tag:hover {
+      background: #2a3142;
+      color: white;
+    }
+    .sub-tag.active {
+      background: #ffbb2e;
+      color: #0b0d17;
+      border-color: #ffbb2e;
+      font-weight: 700;
+    }
+    .select-all-btn {
+      background: linear-gradient(135deg, #2a3a5e, #1e2a3a);
+      border: 2px solid #ffbb2e;
+      color: #ffbb2e;
+      padding: 10px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 14px;
+      transition: all 0.2s;
+      width: 100%;
+    }
+    .select-all-btn:hover {
+      background: linear-gradient(135deg, #3a4a6e, #2a3a4a);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(255, 187, 46, 0.2);
+    }
+    .select-all-btn.active {
+      background: #ffbb2e;
+      color: #0b0d17;
+      border-color: #ffbb2e;
+    }
+    .reset-btn {
+      background: transparent;
+      border: 1px solid #4a5568;
+      color: #a0aec0;
+      padding: 8px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      margin-top: 14px;
+      transition: all 0.2s;
+      width: 100%;
+    }
+    .reset-btn:hover {
+      background: #2d3748;
+      color: white;
+      border-color: #718096;
+    }
+
+    .flowchart-container {
+      position: relative;
+      padding: 10px 0;
+    }
+    .flow-node {
+      display: flex;
+      align-items: flex-start;
+      margin-bottom: 20px;
+      position: relative;
+    }
+    .flow-circle {
+      width: 48px;
+      height: 48px;
+      background: #2a3a5e;
+      border: 2px solid #ffbb2e;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      color: #ffbb2e;
+      font-size: 16px;
+      flex-shrink: 0;
+      z-index: 2;
+    }
+    .flow-content {
+      margin-left: 16px;
+      flex: 1;
+      background: #1e2332;
+      border: 1px solid #3a4155;
+      border-radius: 10px;
+      padding: 14px 16px;
+    }
+    .flow-title {
+      font-weight: 800;
+      color: #ffbb2e;
+      font-size: 15px;
+      margin-bottom: 10px;
+    }
+    .flow-items {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .flow-item {
+      font-size: 13px;
+      line-height: 1.6;
+      color: #cbd5e0;
+      padding-left: 18px;
+      position: relative;
+    }
+    .flow-item::before {
+      content: "•";
+      color: #ffbb2e;
+      font-weight: bold;
+      position: absolute;
+      left: 0;
+    }
+    .flow-arrow {
+      position: absolute;
+      left: 23px;
+      top: 48px;
+      width: 2px;
+      height: calc(100% + 10px);
+      background: linear-gradient(180deg, #ffbb2e, #3a4155);
+    }
+    .flow-subtitle {
+      font-size: 12px;
+      color: #a0aec0;
+      margin: 8px 0 4px 0;
+      padding-left: 18px;
+    }
+    .flow-parallel {
+      background: rgba(255, 187, 46, 0.1);
+      border-left: 3px solid #ffbb2e;
+      padding: 10px 14px;
+      border-radius: 6px;
+      margin: 8px 0;
+    }
+    .flow-parallel-title {
+      font-size: 12px;
+      color: #ffbb2e;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .flow-branch {
+      display: flex;
+      gap: 10px;
+      margin: 10px 0;
+      flex-wrap: wrap;
+    }
+    .flow-branch-item {
+      flex: 1;
+      min-width: 160px;
+      background: #1a1e2b;
+      border: 1px dashed #3a4155;
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+    .flow-branch-title {
+      font-size: 12px;
+      color: #a0aec0;
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+    .flow-branch-content {
+      font-size: 12px;
+      color: #cbd5e0;
+      line-height: 1.5;
+    }
+
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.8);
+      backdrop-filter: blur(8px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      visibility: hidden;
+      opacity: 0;
+      transition: all 0.25s;
+    }
+    .modal-overlay.active {
+      visibility: visible;
+      opacity: 1;
+    }
+    .modal-content {
+      background: #1a1f2e;
+      border: 1px solid #3a4155;
+      border-radius: 16px;
+      padding: 24px;
+      max-width: 700px;
+      width: 90%;
+      color: #ddd;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.7);
+      position: relative;
+    }
+    .modal-close {
+      position: absolute;
+      top: 12px;
+      right: 16px;
+      background: none;
+      border: none;
+      color: #8892b0;
+      font-size: 28px;
+      cursor: pointer;
+      transition: color 0.2s;
+    }
+    .modal-close:hover {
+      color: #ffbb2e;
+    }
+    .modal-title {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 14px;
+      color: #ffbb2e;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="map-viewport" id="mapViewport">
+    <div class="map-container" id="mapContainer"></div>
+    <div class="coord-display" id="coordDisplay">坐标: (0, 0)</div>
+  </div>
+
+  <div class="sidebar" id="sidebar">
+    <div class="watermark">B站可许sama制作</div>
+    <div class="sidebar-section">
+      <div class="section-title">🏷️ 地图筛选</div>
+      <button class="select-all-btn" id="selectAllBtn">✓ 全选显示所有图标</button>
+      <div class="tag-tree" id="tagTree"></div>
+      <button class="reset-btn" id="resetFilterBtn">↺ 重置所有筛选</button>
+    </div>
+    <div class="sidebar-section">
+      <div class="section-title">📜 剧情攻略流程</div>
+      <div class="flowchart-container" id="flowchart"></div>
+    </div>
+    <div class="sidebar-section">
+      <div class="section-title">💡 要点</div>
+      <div class="key-points-list" id="keyPoints"></div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal-content">
+      <button class="modal-close" id="modalClose">&times;</button>
+      <div class="modal-title" id="modalTitle"></div>
+      <div class="modal-body" id="modalBody"></div>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      const MAP_WIDTH = 1024;
+      const MAP_HEIGHT = 1024;
+      let currentZoom = 1;
+      let panX = 0, panY = 0;
+      let isPanning = false;
+      let startMouseX, startMouseY, startPanX, startPanY;
+
+      const mapViewport = document.getElementById('mapViewport');
+      const mapContainer = document.getElementById('mapContainer');
+      const tagTreeDiv = document.getElementById('tagTree');
+      const flowchartDiv = document.getElementById('flowchart');
+      const keyPointsDiv = document.getElementById('keyPoints');
+      const coordDisplay = document.getElementById('coordDisplay');
+      const resetBtn = document.getElementById('resetFilterBtn');
+      const selectAllBtn = document.getElementById('selectAllBtn');
+      const modalOverlay = document.getElementById('modalOverlay');
+      const modalClose = document.getElementById('modalClose');
+      const modalTitle = document.getElementById('modalTitle');
+      const modalBody = document.getElementById('modalBody');
+
+      let selectAllMode = false;
+
+      function applyTransform() {
+        mapContainer.style.transform = `translate(${panX}px, ${panY}px) scale(${currentZoom})`;
+      }
+
+      mapViewport.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const rect = mapViewport.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        const zoomFactor = 0.08;
+        const delta = e.deltaY > 0 ? -zoomFactor : zoomFactor;
+        const newZoom = Math.min(3.5, Math.max(0.3, currentZoom + delta * currentZoom));
+        const scaleChange = newZoom / currentZoom;
+        panX = mouseX - (mouseX - panX) * scaleChange;
+        panY = mouseY - (mouseY - panY) * scaleChange;
+        currentZoom = newZoom;
+        applyTransform();
+      }, { passive: false });
+
+      mapViewport.addEventListener('mousedown', (e) => {
+        if (e.target.closest('.marker')) return;
+        isPanning = true;
+        startMouseX = e.clientX;
+        startMouseY = e.clientY;
+        startPanX = panX;
+        startPanY = panY;
+        mapViewport.style.cursor = 'grabbing';
+      });
+
+      mapViewport.addEventListener('mousemove', (e) => {
+        const rect = mapViewport.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        const mapX = (mouseX - panX) / currentZoom;
+        const mapY = (mouseY - panY) / currentZoom;
+
+        const x = Math.max(0, Math.min(MAP_WIDTH, Math.round(mapX)));
+        const y = Math.max(0, Math.min(MAP_HEIGHT, Math.round(mapY)));
+
+        coordDisplay.textContent = `坐标: (${x}, ${y})`;
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (!isPanning) return;
+        e.preventDefault();
+        panX = startPanX + (e.clientX - startMouseX);
+        panY = startPanY + (e.clientY - startMouseY);
+        applyTransform();
+      });
+
+      window.addEventListener('mouseup', () => {
+        if (isPanning) {
+          isPanning = false;
+          mapViewport.style.cursor = 'grab';
+        }
+      });
+
+      let lastTouchX, lastTouchY, lastTouchDist;
+
+      mapViewport.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 1) {
+          isPanning = true;
+          lastTouchX = e.touches[0].clientX;
+          lastTouchY = e.touches[0].clientY;
+          startPanX = panX;
+          startPanY = panY;
+        } else if (e.touches.length === 2) {
+          isPanning = false;
+          const dx = e.touches[0].clientX - e.touches[1].clientX;
+          const dy = e.touches[0].clientY - e.touches[1].clientY;
+          lastTouchDist = Math.sqrt(dx * dx + dy * dy);
+        }
+      }, { passive: false });
+
+      mapViewport.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        if (e.touches.length === 1 && isPanning) {
+          const dx = e.touches[0].clientX - lastTouchX;
+          const dy = e.touches[0].clientY - lastTouchY;
+          panX = startPanX + dx;
+          panY = startPanY + dy;
+          applyTransform();
+        } else if (e.touches.length === 2) {
+          const dx = e.touches[0].clientX - e.touches[1].clientX;
+          const dy = e.touches[0].clientY - e.touches[1].clientY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const scale = dist / lastTouchDist;
+          currentZoom = Math.min(3.5, Math.max(0.3, currentZoom * scale));
+          lastTouchDist = dist;
+          applyTransform();
+        }
+      }, { passive: false });
+
+      mapViewport.addEventListener('touchend', () => {
+        isPanning = false;
+      });
+
+      applyTransform();
+
+      const categories = [
+        {
+          id: 'task-props', name: '任务道具', expandable: true,
+          children: ['铁链','罐头','信号器','撬棍','碎肉','奇迹弹幕']
+        },
+        {
+          id: 'task-locations', name: '任务地点', expandable: true,
+          children: ['罐头放置地','炮弹放置地','实验室','娃娃机','信号塔','教堂','烤肉广场','墓地']
+        },
+        { id: 'armory', name: '军械库', expandable: false, children: ['军械库','军械库','军械库'] },
+        { id: 'workbench', name: '工作台', expandable: false, children: ['工作台','工作台','工作台'] },
+        { id: 'fishing-rod', name: '鱼竿', expandable: false, children: ['鱼竿','鱼竿','鱼竿','鱼竿'] },
+        { id: 'fishing-spot', name: '钓鱼台', expandable: false, children: ['钓鱼台','钓鱼台','钓鱼台','钓鱼台','钓鱼台','钓鱼台','钓鱼台','钓鱼台','钓鱼台','钓鱼台','钓鱼台'] },
+        { id: 'container', name: '集装箱', expandable: false, children: ['集装箱','集装箱','集装箱','集装箱'] },
+        { id: 'wall-weapon', name: '墙购武器', expandable: true, children: ['CODA9','艾科12','RK-9','X9先驱','VS侦察步枪','DS20幻影','卫登308','暗影SK','M8A1','和平卫士','MXR-17','M10强攻','MPC-25','XM325'] }
+      ];
+
+      const markersData = [
+        { id:'m1', name:'铁链', tags:['task-props/铁链'], catClass:'cat-task-props', icon:'⛓️', detail:{type:'image',src:'Images/任务道具任务地点/铁链.png'}, x:349, y:669 },
+        { id:'m2', name:'罐头', tags:['task-props/罐头'], catClass:'cat-task-props', icon:'🥫', detail:{type:'image',src:'Images/任务道具任务地点/罐头.png'}, x:378, y:328 },
+        { id:'m5', name:'信号器', tags:['task-props/信号器'], catClass:'cat-task-props', icon:'📡', detail:{type:'image',src:'Images/任务道具任务地点/信号器.png'}, x:546, y:974 },
+        { id:'m6', name:'撬棍', tags:['task-props/撬棍'], catClass:'cat-task-props', icon:'🔧', detail:{type:'image',src:'Images/任务道具任务地点/撬棍.png'}, x:848, y:827 },
+        { id:'m10', name:'碎肉', tags:['task-props/碎肉'], catClass:'cat-task-props', icon:'🥩', detail:{type:'image',src:'Images/任务道具任务地点/碎肉.png'}, x:219, y:327 },
+        { id:'m11', name:'奇迹弹幕', tags:['task-props/奇迹弹幕'], catClass:'cat-task-props', icon:'✨', detail:{type:'image',src:'Images/任务道具任务地点/奇迹弹幕.png'}, x:280, y:450 },
+        { id:'loc3', name:'罐头放置地', tags:['task-locations/罐头放置地'], catClass:'cat-task-locations', icon:'📍', detail:{type:'image',src:'Images/任务道具任务地点/罐头放置地.png'}, x:657, y:491 },
+        { id:'loc4', name:'炮弹放置地', tags:['task-locations/炮弹放置地'], catClass:'cat-task-locations', icon:'📍', detail:{type:'image',src:'Images/任务道具任务地点/炮塔放置地.png'}, x:739, y:848 },
+        { id:'loc6', name:'实验室', tags:['task-locations/实验室'], catClass:'cat-task-locations', icon:'🧪', detail:{type:'image',src:'Images/任务道具任务地点/实验室.png'}, x:395, y:453 },
+        { id:'loc7', name:'娃娃机', tags:['task-locations/娃娃机'], catClass:'cat-task-locations', icon:'🧸', detail:{type:'image',src:'Images/任务道具任务地点/娃娃机.png'}, x:366, y:777 },
+        { id:'loc8', name:'信号塔', tags:['task-locations/信号塔'], catClass:'cat-task-locations', icon:'🗼', detail:{type:'image',src:'Images/任务道具任务地点/信号塔.png'}, x:258, y:416 },
+        { id:'loc9', name:'教堂', tags:['task-locations/教堂'], catClass:'cat-task-locations', icon:'⛪', detail:{type:'image',src:'Images/任务道具任务地点/教堂.png'}, x:674, y:394 },
+        { id:'loc10', name:'烤肉广场', tags:['task-locations/烤肉广场'], catClass:'cat-task-locations', icon:'🔥', detail:{type:'image',src:'Images/任务道具任务地点/烤肉广场.png'}, x:682, y:625 },
+        { id:'loc11', name:'墓地', tags:['task-locations/墓地'], catClass:'cat-task-locations', icon:'💀', detail:{type:'image',src:'Images/任务道具任务地点/墓地.png'}, x:751, y:391 },
+        { id:'arm1', name:'军械库', tags:['armory/军械库'], catClass:'cat-armory', icon:'', detail:{type:'image',src:'Images/军械库工作台/军械库.png'}, x:160, y:544 },
+        { id:'arm2', name:'军械库', tags:['armory/军械库'], catClass:'cat-armory', icon:'', detail:{type:'image',src:'Images/军械库工作台/军械库.png'}, x:804, y:710 },
+        { id:'arm3', name:'军械库', tags:['armory/军械库'], catClass:'cat-armory', icon:'', detail:{type:'image',src:'Images/军械库工作台/军械库.png'}, x:495, y:707 },
+        { id:'wb1', name:'工作台', tags:['workbench/工作台'], catClass:'cat-workbench', icon:'', detail:{type:'image',src:'Images/军械库工作台/工作台.png'}, x:348, y:799 },
+        { id:'wb2', name:'工作台', tags:['workbench/工作台'], catClass:'cat-workbench', icon:'', detail:{type:'image',src:'Images/军械库工作台/工作台.png'}, x:829, y:765 },
+        { id:'wb3', name:'工作台', tags:['workbench/工作台'], catClass:'cat-workbench', icon:'', detail:{type:'image',src:'Images/军械库工作台/工作台.png'}, x:660, y:376 },
+        { id:'fishspot1', name:'泰尔脚钓鱼台', tags:['fishing-spot/钓鱼台'], catClass:'cat-fishing-spot', icon:'🎣', detail:{type:'image',src:'Images/钓鱼台鱼竿/泰尔脚钓鱼台.png'}, x:263, y:381 },
+        { id:'fishspot2', name:'干船坞钓鱼台', tags:['fishing-spot/钓鱼台'], catClass:'cat-fishing-spot', icon:'🎣', detail:{type:'image',src:'Images/钓鱼台鱼竿/干船坞钓鱼台.png'}, x:398, y:632 },
+        { id:'fishspot3', name:'CODA9钓鱼台', tags:['fishing-spot/钓鱼台'], catClass:'cat-fishing-spot', icon:'🎣', detail:{type:'image',src:'Images/钓鱼台鱼竿/CODA9钓鱼台.png'}, x:536, y:937 },
+        { id:'fishspot4', name:'快活钓鱼台', tags:['fishing-spot/钓鱼台'], catClass:'cat-fishing-spot', icon:'🎣', detail:{type:'image',src:'Images/钓鱼台鱼竿/快活钓鱼台.png'}, x:638, y:855 },
+        { id:'fishspot5', name:'灯塔钓鱼台其一', tags:['fishing-spot/钓鱼台'], catClass:'cat-fishing-spot', icon:'🎣', detail:{type:'image',src:'Images/钓鱼台鱼竿/灯塔钓鱼台其一.png'}, x:740, y:876 },
+        { id:'fishspot6', name:'灯塔钓鱼台其二', tags:['fishing-spot/钓鱼台'], catClass:'cat-fishing-spot', icon:'🎣', detail:{type:'image',src:'Images/钓鱼台鱼竿/灯塔钓鱼台其二.png'}, x:926, y:761 },
+        { id:'fishspot7', name:'灯塔滑索钓鱼台', tags:['fishing-spot/钓鱼台'], catClass:'cat-fishing-spot', icon:'🎣', detail:{type:'image',src:'Images/钓鱼台鱼竿/灯塔滑索钓鱼台.png'}, x:665, y:702 },
+        { id:'fishspot8', name:'军械库钓鱼台', tags:['fishing-spot/钓鱼台'], catClass:'cat-fishing-spot', icon:'🎣', detail:{type:'image',src:'Images/钓鱼台鱼竿/军械库钓鱼台.png'}, x:505, y:613 },
+        { id:'fishspot9', name:'厚血钓鱼台', tags:['fishing-spot/钓鱼台'], catClass:'cat-fishing-spot', icon:'🎣', detail:{type:'image',src:'Images/钓鱼台鱼竿/厚血钓鱼台.png'}, x:512, y:472 },
+        { id:'fishspot10', name:'超改钓鱼台', tags:['fishing-spot/钓鱼台'], catClass:'cat-fishing-spot', icon:'🎣', detail:{type:'image',src:'Images/钓鱼台鱼竿/超改钓鱼台.png'}, x:448, y:431 },
+        { id:'fishspot11', name:'教堂钓鱼台', tags:['fishing-spot/钓鱼台'], catClass:'cat-fishing-spot', icon:'🎣', detail:{type:'image',src:'Images/钓鱼台鱼竿/教堂钓鱼台.png'}, x:572, y:351 },
+        { id:'rod1', name:'灯塔鱼竿', tags:['fishing-rod/鱼竿'], catClass:'cat-fishing-rod', icon:'🎣', detail:{type:'image',src:'Images/钓鱼台鱼竿/灯塔鱼竿.png'}, x:833, y:739 },
+        { id:'rod2', name:'干船坞鱼竿', tags:['fishing-rod/鱼竿'], catClass:'cat-fishing-rod', icon:'🎣', detail:{type:'image',src:'Images/钓鱼台鱼竿/干船坞鱼竿.png'}, x:259, y:683 },
+        { id:'rod3', name:'风暴之桥鱼竿', tags:['fishing-rod/鱼竿'], catClass:'cat-fishing-rod', icon:'🎣', detail:{type:'image',src:'Images/钓鱼台鱼竿/风暴之桥鱼竿.png'}, x:464, y:310 },
+        { id:'rod4', name:'烤肉广场鱼竿', tags:['fishing-rod/鱼竿'], catClass:'cat-fishing-rod', icon:'🎣', detail:{type:'image',src:'Images/钓鱼台鱼竿/烤肉广场鱼竿.png'}, x:659, y:610 },
+        { id:'container1', name:'集装箱', tags:['container/集装箱'], catClass:'cat-container', icon:'📦', detail:{type:'image',src:'Images/集装箱/集装箱之一.png'}, x:208, y:434 },
+        { id:'container2', name:'集装箱', tags:['container/集装箱'], catClass:'cat-container', icon:'📦', detail:{type:'image',src:'Images/集装箱/集装箱之二.png'}, x:226, y:511 },
+        { id:'container3', name:'集装箱', tags:['container/集装箱'], catClass:'cat-container', icon:'📦', detail:{type:'image',src:'Images/集装箱/集装箱之三.png'}, x:409, y:855 },
+        { id:'container4', name:'集装箱', tags:['container/集装箱'], catClass:'cat-container', icon:'📦', detail:{type:'image',src:'Images/集装箱/集装箱四.png'}, x:247, y:697 },
+        { id:'ww1', name:'CODA9', tags:['wall-weapon/CODA9'], icon:'', catClass:'cat-wall-weapon', detail:{type:'image',src:'Images/墙购/CODA9.png'}, x:558, y:960 },
+        { id:'ww2', name:'艾科12', tags:['wall-weapon/艾科12'], icon:'', catClass:'cat-wall-weapon', detail:{type:'image',src:'Images/墙购/艾科12.png'}, x:541, y:855 },
+        { id:'ww3', name:'RK-9', tags:['wall-weapon/RK-9'], icon:'', catClass:'cat-wall-weapon', detail:{type:'image',src:'Images/墙购/RK-9.png'}, x:383, y:724 },
+        { id:'ww4', name:'X9先驱', tags:['wall-weapon/X9先驱'], icon:'', catClass:'cat-wall-weapon', detail:{type:'image',src:'Images/墙购/X9先驱.png'}, x:287, y:707 },
+        { id:'ww5', name:'VS侦察步枪', tags:['wall-weapon/VS侦察步枪'], icon:'', catClass:'cat-wall-weapon', detail:{type:'image',src:'Images/墙购/VS侦察步枪.png'}, x:233, y:513 },
+        { id:'ww6', name:'DS20幻影', tags:['wall-weapon/DS20幻影'], icon:'', catClass:'cat-wall-weapon', detail:{type:'image',src:'Images/墙购/DS20幻影.png'}, x:194, y:524 },
+        { id:'ww7', name:'卫登308', tags:['wall-weapon/卫登308'], icon:'', catClass:'cat-wall-weapon', detail:{type:'image',src:'Images/墙购/卫登308.png'}, x:273, y:365 },
+        { id:'ww8', name:'暗影SK', tags:['wall-weapon/暗影SK'], icon:'', catClass:'cat-wall-weapon', detail:{type:'image',src:'Images/墙购/暗影SK.png'}, x:628, y:316 },
+        { id:'ww9', name:'M8A1', tags:['wall-weapon/M8A1'], icon:'', catClass:'cat-wall-weapon', detail:{type:'image',src:'Images/墙购/M8A1.png'}, x:692, y:386 },
+        { id:'ww10', name:'和平卫士', tags:['wall-weapon/和平卫士'], icon:'', catClass:'cat-wall-weapon', detail:{type:'image',src:'Images/墙购/和平卫士.png'}, x:649, y:465 },
+        { id:'ww11', name:'MXR-17', tags:['wall-weapon/MXR-17'], icon:'', catClass:'cat-wall-weapon', detail:{type:'image',src:'Images/墙购/MXR-17.png'}, x:393, y:498 },
+        { id:'ww12', name:'M10强攻', tags:['wall-weapon/M10强攻'], icon:'', catClass:'cat-wall-weapon', detail:{type:'image',src:'Images/墙购/M10强攻.png'}, x:688, y:601 },
+        { id:'ww13', name:'MPC-25', tags:['wall-weapon/MPC-25'], icon:'', catClass:'cat-wall-weapon', detail:{type:'image',src:'Images/墙购/MPC-25.png'}, x:547, y:719 },
+        { id:'ww14', name:'XM325', tags:['wall-weapon/XM325'], icon:'', catClass:'cat-wall-weapon', detail:{type:'image',src:'Images/墙购/XM325.png'}, x:769, y:774 },
+      ];
+
+      let activeFilters = new Set();
+
+      function createMarkerElement(markerData) {
+        const div = document.createElement('div');
+        div.className = 'marker';
+        div.dataset.markerId = markerData.id;
+        div.style.left = markerData.x + 'px';
+        div.style.top = markerData.y + 'px';
+        const iconDiv = document.createElement('div');
+        const catClass = markerData.catClass || 'cat-task-props';
+        iconDiv.className = 'marker-icon ' + catClass;
+        if (markerData.detail && markerData.detail.src && (catClass === 'cat-armory' || catClass === 'cat-workbench')) {
+          const img = document.createElement('img');
+          img.src = markerData.detail.src;
+          img.style.width = '100%';
+          img.style.height = '100%';
+          img.style.objectFit = 'contain';
+          iconDiv.appendChild(img);
+        } else {
+          iconDiv.textContent = markerData.icon || '';
+        }
+        div.appendChild(iconDiv);
+        div.addEventListener('click', (e) => {
+          if (catClass === 'cat-armory' || catClass === 'cat-workbench') {
+            return;
+          }
+          e.stopPropagation();
+          showMarkerDetail(markerData);
+        });
+        return div;
+      }
+
+      markersData.forEach(md => {
+        const el = createMarkerElement(md);
+        mapContainer.appendChild(el);
+      });
+
+      let previousVisibleIds = new Set();
+      
+      function updateMarkerVisibility() {
+        const markers = document.querySelectorAll('.marker');
+        const newlyVisibleMarkers = [];
+        const currentVisibleIds = new Set();
+        
+        markers.forEach(markerEl => {
+          const id = markerEl.dataset.markerId;
+          const data = markersData.find(m => m.id === id);
+          if (!data) return;
+          markerEl.classList.remove('visible-marker');
+          
+          if (selectAllMode) {
+            markerEl.classList.remove('hidden-marker');
+            currentVisibleIds.add(id);
+            if (!previousVisibleIds.has(id)) {
+              newlyVisibleMarkers.push(data);
+            }
+            return;
+          }
+          if (activeFilters.size === 0) {
+            markerEl.classList.add('hidden-marker');
+            return;
+          }
+          const isVisible = data.tags.some(tag => activeFilters.has(tag));
+          markerEl.classList.toggle('hidden-marker', !isVisible);
+          if (isVisible) {
+            currentVisibleIds.add(id);
+            if (!previousVisibleIds.has(id)) {
+              newlyVisibleMarkers.push(data);
+            }
+          }
+        });
+        
+        previousVisibleIds = currentVisibleIds;
+        
+        if (newlyVisibleMarkers.length > 0) {
+          fitMapToMarkers(newlyVisibleMarkers);
+          setTimeout(() => {
+            newlyVisibleMarkers.forEach(m => {
+              const markerEl = document.querySelector(`.marker[data-marker-id="${m.id}"]`);
+              if (markerEl) {
+                markerEl.classList.add('visible-marker');
+              }
+            });
+          }, 300);
+        }
+      }
+      
+      function fitMapToMarkers(markers) {
+        if (markers.length === 0) return;
+        
+        let minX = Infinity, maxX = -Infinity;
+        let minY = Infinity, maxY = -Infinity;
+        
+        markers.forEach(m => {
+          minX = Math.min(minX, m.x);
+          maxX = Math.max(maxX, m.x);
+          minY = Math.min(minY, m.y);
+          maxY = Math.max(maxY, m.y);
+        });
+        
+        const padding = 80;
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+        const width = maxX - minX + padding * 2;
+        const height = maxY - minY + padding * 2;
+        
+        const rect = mapViewport.getBoundingClientRect();
+        const scaleX = rect.width / width;
+        const scaleY = rect.height / height;
+        const newZoom = Math.min(scaleX, scaleY, 2);
+        
+        currentZoom = newZoom;
+        panX = rect.width / 2 - centerX * newZoom;
+        panY = rect.height / 2 - centerY * newZoom;
+        applyTransform();
+      }
+
+      function showMarkerDetail(markerData) {
+        modalTitle.textContent = markerData.name;
+        let mediaHtml = '';
+        const detail = markerData.detail;
+        if (detail && detail.src) {
+          mediaHtml = `
+            <div id="detailImageContainer" style="overflow:auto; max-height:60vh; background:#0b0d17; border-radius:10px; position:relative;">
+              <img id="detailImage" src="${detail.src}" alt="${markerData.name}" style="max-width:100%; border-radius:10px; cursor:zoom-in; user-select:none;" draggable="false">
+              <div id="fullscreenControls" style="display:none; position:fixed; top:20px; right:20px; z-index:10000; gap:10px; flex-direction:row;">
+                <a href="${detail.src}" download="${markerData.name}.png" style="background:#ffbb2e; border:1px solid #ffbb2e; color:#0b0d17; padding:8px 16px; border-radius:8px; cursor:pointer; font-size:14px; text-decoration:none; display:inline-block; font-weight:bold;">⬇️ 下载</a>
+                <button onclick="window.toggleFullscreen()" style="background:#2a3a5e; border:1px solid #ffbb2e; color:#ffbb2e; padding:8px 16px; border-radius:8px; cursor:pointer; font-size:14px;">✕ 关闭</button>
+              </div>
+            </div>
+          `;
+        } else {
+          mediaHtml = `<div style="background:#232838; border-radius:10px; padding:30px; text-align:center;">
+            <span style="font-size:48px;">${markerData.icon}</span>
+            <p style="color:#718096; margin-top:15px;">[ 待补充图片 ]</p>
+          </div>`;
+        }
+        modalBody.innerHTML = `
+          <p style="margin-bottom:12px; color:#a0aec0; text-align:center;">坐标: (${markerData.x}, ${markerData.y})</p>
+          ${mediaHtml}
+        `;
+        
+        window.isFullscreen = false;
+        window.imageZoom = 1;
+        
+        window.toggleFullscreen = function() {
+          window.isFullscreen = !window.isFullscreen;
+          const container = document.getElementById('detailImageContainer');
+          const img = document.getElementById('detailImage');
+          const controls = document.getElementById('fullscreenControls');
+          if (window.isFullscreen) {
+            container.style.position = 'fixed';
+            container.style.top = '0';
+            container.style.left = '0';
+            container.style.width = '100vw';
+            container.style.height = '100vh';
+            container.style.zIndex = '9999';
+            container.style.maxHeight = 'none';
+            container.style.display = 'flex';
+            container.style.alignItems = 'center';
+            container.style.justifyContent = 'center';
+            container.style.background = 'rgba(0,0,0,0.95)';
+            container.style.borderRadius = '0';
+            img.style.maxWidth = '90vw';
+            img.style.maxHeight = '90vh';
+            img.style.objectFit = 'contain';
+            img.style.cursor = 'default';
+            if (controls) controls.style.display = 'flex';
+          } else {
+            container.style.position = 'relative';
+            container.style.top = 'auto';
+            container.style.left = 'auto';
+            container.style.width = 'auto';
+            container.style.height = 'auto';
+            container.style.zIndex = 'auto';
+            container.style.maxHeight = '60vh';
+            container.style.display = 'block';
+            container.style.alignItems = 'flex-start';
+            container.style.justifyContent = 'flex-start';
+            container.style.background = '#0b0d17';
+            container.style.borderRadius = '10px';
+            img.style.maxWidth = '100%';
+            img.style.maxHeight = 'none';
+            img.style.objectFit = 'contain';
+            img.style.cursor = 'zoom-in';
+            img.style.transform = 'scale(1)';
+            window.imageZoom = 1;
+            if (controls) controls.style.display = 'none';
+          }
+        };
+        
+        const img = document.getElementById('detailImage');
+        const container = document.getElementById('detailImageContainer');
+        if (img) {
+          img.addEventListener('click', window.toggleFullscreen);
+          img.addEventListener('wheel', function(e) {
+            if (!window.isFullscreen) return;
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? -0.2 : 0.2;
+            window.imageZoom = Math.max(0.5, Math.min(5, window.imageZoom + delta));
+            img.style.transform = `scale(${window.imageZoom})`;
+          }, { passive: false });
+        }
+        
+        modalOverlay.classList.add('active');
+      }
+      modalClose.addEventListener('click', () => modalOverlay.classList.remove('active'));
+      modalOverlay.addEventListener('click', (e) => {
+        if (e.target === modalOverlay) modalOverlay.classList.remove('active');
+      });
+
+      function buildTagTree() {
+        tagTreeDiv.innerHTML = '';
+        categories.forEach(cat => {
+          const catDiv = document.createElement('div');
+          catDiv.className = 'tag-category';
+          const header = document.createElement('div');
+          header.className = 'category-header' + (cat.expandable ? '' : ' no-expand');
+          header.innerHTML = `<span>${cat.name}</span><span class="arrow">▶</span>`;
+          const subList = document.createElement('div');
+          subList.className = 'subcategory-list';
+          
+          if (cat.expandable && cat.children.length > 0) {
+            const selectAllBtn = document.createElement('button');
+            selectAllBtn.className = 'select-all-btn';
+            selectAllBtn.textContent = '全选';
+            selectAllBtn.style.width = '100%';
+            selectAllBtn.style.padding = '6px 12px';
+            selectAllBtn.style.marginBottom = '8px';
+            selectAllBtn.style.background = '#2a3a5e';
+            selectAllBtn.style.border = '1px solid #ffbb2e';
+            selectAllBtn.style.color = '#ffbb2e';
+            selectAllBtn.style.borderRadius = '6px';
+            selectAllBtn.style.cursor = 'pointer';
+            selectAllBtn.style.fontSize = '12px';
+            selectAllBtn.style.fontWeight = 'bold';
+            selectAllBtn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              const allChildTags = [];
+              for (let i = 0; i < cat.children.length; i++) {
+                allChildTags.push(`${cat.id}/${cat.children[i]}`);
+              }
+              const allActive = allChildTags.every(t => activeFilters.has(t));
+              if (allActive) {
+                allChildTags.forEach(t => activeFilters.delete(t));
+                selectAllBtn.textContent = '全选';
+                selectAllBtn.style.background = '#2a3a5e';
+                selectAllBtn.style.color = '#ffbb2e';
+              } else {
+                allChildTags.forEach(t => activeFilters.add(t));
+                selectAllBtn.textContent = '取消全选';
+                selectAllBtn.style.background = '#ffbb2e';
+                selectAllBtn.style.color = '#0b0d17';
+              }
+              updateUIAfterFilterChange();
+            });
+            subList.appendChild(selectAllBtn);
+            
+            cat.children.forEach((childName, idx) => {
+              const subTag = document.createElement('span');
+              subTag.className = 'sub-tag';
+              subTag.textContent = childName;
+              const tagValue = `${cat.id}/${childName}`;
+              subTag.dataset.tag = tagValue;
+              subTag.addEventListener('click', (e) => {
+                e.stopPropagation();
+                toggleFilterTag(tagValue, subTag);
+                const allChildTags = [];
+                for (let i = 0; i < cat.children.length; i++) {
+                  allChildTags.push(`${cat.id}/${cat.children[i]}`);
+                }
+                const allActive = allChildTags.every(t => activeFilters.has(t));
+                if (allActive) {
+                  selectAllBtn.textContent = '取消全选';
+                  selectAllBtn.style.background = '#ffbb2e';
+                  selectAllBtn.style.color = '#0b0d17';
+                } else {
+                  selectAllBtn.textContent = '全选';
+                  selectAllBtn.style.background = '#2a3a5e';
+                  selectAllBtn.style.color = '#ffbb2e';
+                }
+              });
+              subList.appendChild(subTag);
+            });
+          } else if (cat.expandable && cat.children.length === 0) {
+            const emptySpan = document.createElement('span');
+            emptySpan.className = 'sub-tag';
+            emptySpan.textContent = '暂无';
+            emptySpan.style.opacity = '0.5';
+            emptySpan.style.pointerEvents = 'none';
+            subList.appendChild(emptySpan);
+          }
+          
+          header.addEventListener('click', (e) => {
+            e.stopPropagation();
+            
+            if (cat.expandable) {
+              const isExpanded = header.classList.contains('expanded');
+              if (!isExpanded) {
+                header.classList.add('expanded');
+                subList.classList.add('show');
+              } else {
+                header.classList.remove('expanded');
+                subList.classList.remove('show');
+              }
+            }
+            
+            if (!cat.expandable) {
+              const allChildTags = [];
+              for (let i = 0; i < cat.children.length; i++) {
+                allChildTags.push(`${cat.id}/${cat.children[i]}`);
+              }
+              
+              const allActive = allChildTags.every(t => activeFilters.has(t));
+              if (allActive) {
+                allChildTags.forEach(t => activeFilters.delete(t));
+              } else {
+                allChildTags.forEach(t => activeFilters.add(t));
+              }
+              updateUIAfterFilterChange();
+            }
+          });
+          
+          catDiv.appendChild(header);
+          if (cat.expandable) {
+            catDiv.appendChild(subList);
+          }
+          tagTreeDiv.appendChild(catDiv);
+        });
+      }
+
+      function toggleFilterTag(tagValue, element) {
+        if (activeFilters.has(tagValue)) {
+          activeFilters.delete(tagValue);
+        } else {
+          activeFilters.add(tagValue);
+        }
+        updateUIAfterFilterChange();
+      }
+
+      function updateUIAfterFilterChange() {
+        document.querySelectorAll('.sub-tag').forEach(el => {
+          const tag = el.dataset.tag;
+          if (tag && activeFilters.has(tag)) {
+            el.classList.add('active');
+          } else {
+            el.classList.remove('active');
+          }
+        });
+        
+        document.querySelectorAll('.category-header').forEach(header => {
+          const catDiv = header.parentElement;
+          const cat = categories.find(c => c.name === header.querySelector('span').textContent);
+          let allChildTags = [];
+          if (cat) {
+            for (let i = 0; i < cat.children.length; i++) {
+              allChildTags.push(`${cat.id}/${cat.children[i]}`);
+            }
+          }
+          const allActive = allChildTags.length > 0 && allChildTags.every(t => activeFilters.has(t));
+          if (allActive && activeFilters.size > 0) {
+            header.classList.add('active');
+          } else {
+            header.classList.remove('active');
+          }
+        });
+        
+        updateMarkerVisibility();
+      }
+
+      resetBtn.addEventListener('click', () => {
+        activeFilters.clear();
+        selectAllMode = false;
+        selectAllBtn.classList.remove('active');
+        updateUIAfterFilterChange();
+        resetMapView();
+      });
+
+      selectAllBtn.addEventListener('click', () => {
+        selectAllMode = !selectAllMode;
+        selectAllBtn.classList.toggle('active', selectAllMode);
+        if (selectAllMode) {
+          activeFilters.clear();
+          document.querySelectorAll('.sub-tag').forEach(el => el.classList.remove('active'));
+          document.querySelectorAll('.category-header').forEach(el => el.classList.remove('active'));
+        }
+        updateMarkerVisibility();
+      });
+
+      function resetMapView() {
+        const rect = mapViewport.getBoundingClientRect();
+        const scaleX = rect.width / MAP_WIDTH;
+        const scaleY = rect.height / MAP_HEIGHT;
+        currentZoom = Math.min(scaleX, scaleY, 1);
+        panX = (rect.width - MAP_WIDTH * currentZoom) / 2;
+        panY = (rect.height - MAP_HEIGHT * currentZoom) / 2;
+        applyTransform();
+      }
+
+      function buildFlowchart() {
+        const steps = [
+          {
+            num: '1',
+            title: '第一步：解锁 PAP',
+            items: ['解锁 PAP']
+          },
+          {
+            num: '2',
+            title: '第二步：收集基础道具',
+            items: ['拿到铁链', '拿到罐头', '放置灯笼', '获取撬棍', '获得奇迹武器']
+          },
+          {
+            num: '3',
+            title: '第三步：完成灯塔岛任务 & 获取奇迹弹幕',
+            items: [
+              '开箱子拿到炮弹 → 前往灯塔岛放置炮弹 → 用奇迹武器近战攻击',
+              '搜索信号器 → 前往索尔头部放置信号器',
+              '前往信号塔输入两次信号 → 获得奇迹弹幕 → 打开娃娃机的门'
+            ]
+          },
+          {
+            num: '4',
+            title: '第四步：收集三个铀',
+            items: ['💡 这一步可与第二步同步进行，且三个铀没有固定顺序'],
+            branches: [
+              { label: '方式一', content: '用小车炸开实验室 → 获取铀' },
+              { label: '方式二', content: '钓绿色鱼 → 杀死特殊劫掠者 → 获取铀' },
+              { label: '方式三', content: '杀死20个被反重力钟举起的僵尸 → 获取铀' }
+            ],
+            parallel: true
+          },
+          {
+            num: '5',
+            title: '第五步：制作太阳石',
+            items: [
+              '抓娃娃获得原子能核心',
+              '前往快速复苏附近充能',
+              '前往风暴大桥放置核心',
+              '前往泰尔脚附近拿到碎肉',
+              '前往碎肉广场 → 用奇迹武器点燃篝火 → 放置碎肉',
+              '变身门徒进行烤肉 → 获得太阳石'
+            ]
+          },
+          {
+            num: '6',
+            title: '第六步：最终决战',
+            items: [
+              '将太阳石放到教堂',
+              '按照从简单到复杂的顺序（跟随箭头指引），用奇迹武器依次点燃地图上的符号',
+              '进入 Boss 战'
+            ]
+          }
+        ];
+
+        flowchartDiv.innerHTML = '';
+        steps.forEach((step, index) => {
+          const stepDiv = document.createElement('div');
+          stepDiv.className = 'flow-node';
+          
+          let itemsHtml = '';
+          if (step.items) {
+            itemsHtml = '<div class="flow-items">';
+            step.items.forEach(item => {
+              itemsHtml += `<div class="flow-item">${item}</div>`;
+            });
+            itemsHtml += '</div>';
+          }
+          
+          let branchesHtml = '';
+          if (step.branches && step.branches.length > 0) {
+            branchesHtml = '<div class="flow-branch">';
+            step.branches.forEach(branch => {
+              branchesHtml += `<div class="flow-branch-item">`;
+              if (branch.label) {
+                branchesHtml += `<div class="flow-branch-title">${branch.label}</div>`;
+              }
+              branchesHtml += `<div class="flow-branch-content">${branch.content}</div></div>`;
+            });
+            branchesHtml += '</div>';
+          }
+          
+          stepDiv.innerHTML = `
+            <div class="flow-circle">${step.num}</div>
+            <div class="flow-content">
+              <div class="flow-title">${step.title}</div>
+              ${itemsHtml}
+              ${branchesHtml}
+            </div>
+            ${index < steps.length - 1 ? '<div class="flow-arrow"></div>' : ''}
+          `;
+          flowchartDiv.appendChild(stepDiv);
+        });
+      }
+
+      function buildKeyPoints() {
+        const points = [
+          { title: '开局提示', content: '广场那边开局就有 ARC 小车拿，用来开实验室门。' },
+          { title: '铀的拿取', content: '铀的拿取不限回合、不限前置。' },
+          { title: '武器推荐', content: 'BOSS 战双持冲锋枪最好用，因为这个 BOSS 对于伤害距离衰减微乎其微，不管是打真身还是打悬浮头（可以一次秒）。' },
+          { title: '悬浮头打法', content: '悬浮头可以不止用奇迹武器，还能用投掷物。最佳用法是战争机器两发打下来（相比投掷物，备弹多）。' },
+          { title: 'BOSS 躲避技巧', content: '在 BOSS 触发冻结范围前先躲避龟波气功，随后去到中心开启陷阱，然后参照最后一阶段躲陨石进行攻击即可。' },
+          { title: '陨石注意事项', content: '如果一味地躲石头后面来躲避陨石，不仅甲会全碎（陨石有溅射伤害），还容易被冰冻的持续伤害打的不知所措，还没良好的输出空间。' }
+        ];
+        keyPointsDiv.innerHTML = '';
+        points.forEach(point => {
+          const item = document.createElement('div');
+          item.className = 'key-point-item';
+          item.innerHTML = `<div class="kp-title">${point.title}</div><div class="kp-content">${point.content}</div>`;
+          keyPointsDiv.appendChild(item);
+        });
+      }
+
+      buildTagTree();
+      buildFlowchart();
+      buildKeyPoints();
+      updateMarkerVisibility();
+      resetMapView();
+      
+      window.addEventListener('resize', resetMapView);
+    })();
+  </script>
+</body>
+</html>
