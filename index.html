@@ -549,9 +549,7 @@
       }
 
       .coord-display {
-        font-size: 12px;
-        padding: 6px 12px;
-        bottom: 75px;
+        display: none;
       }
 
       .sidebar-section {
@@ -1457,6 +1455,14 @@
       window.addEventListener('resize', () => {
         resetMapView();
         if (!isMobile()) {
+          sidebar.classList.remove('active');
+        }
+      });
+
+      // 点击地图区域回到地图（移动端）
+      mapViewport.addEventListener('click', () => {
+        if (isMobile() && sidebar.classList.contains('active')) {
+          setActiveNav(navMap);
           sidebar.classList.remove('active');
         }
       });
