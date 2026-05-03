@@ -477,6 +477,166 @@
       color: #ffbb2e;
       text-align: center;
     }
+
+    /* 手机适配样式 */
+    @media (max-width: 768px) {
+      body {
+        flex-direction: column;
+        height: 100vh;
+      }
+
+      .map-viewport {
+        flex: 1;
+        min-height: 50vh;
+        padding-bottom: 60px;
+      }
+
+      .sidebar {
+        width: 100%;
+        position: fixed;
+        bottom: 60px;
+        left: 0;
+        right: 0;
+        height: 0;
+        max-height: calc(70vh - 60px);
+        overflow-y: auto;
+        border-left: none;
+        border-top: 1px solid #3a4155;
+        transition: height 0.3s ease;
+        z-index: 50;
+      }
+
+      .sidebar.active {
+        height: calc(70vh - 60px);
+      }
+
+      .bottom-nav {
+        display: flex;
+        justify-content: space-around;
+        align-items: center;
+        background: #1a1f2e;
+        border-top: 1px solid #3a4155;
+        padding: 8px 0;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 60;
+        height: 60px;
+      }
+
+      .nav-btn {
+        background: none;
+        border: none;
+        color: #a0aec0;
+        padding: 6px 12px;
+        font-size: 12px;
+        cursor: pointer;
+        transition: color 0.2s;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+      }
+
+      .nav-btn.active {
+        color: #ffbb2e;
+      }
+
+      .nav-icon {
+        font-size: 22px;
+      }
+
+      .coord-display {
+        font-size: 12px;
+        padding: 6px 12px;
+        bottom: 75px;
+      }
+
+      .sidebar-section {
+        padding: 12px 16px;
+      }
+
+      .section-title {
+        font-size: 15px;
+      }
+
+      .marker-icon {
+        width: 28px;
+        height: 28px;
+        font-size: 14px;
+      }
+
+      .marker-icon.cat-wall-weapon {
+        width: 22px;
+        height: 22px;
+        font-size: 11px;
+      }
+
+      .flow-circle {
+        width: 40px;
+        height: 40px;
+        font-size: 14px;
+      }
+
+      .flow-title {
+        font-size: 14px;
+      }
+
+      .flow-item {
+        font-size: 12px;
+      }
+
+      .modal-content {
+        padding: 16px;
+        width: 95%;
+        max-height: 85vh;
+        overflow-y: auto;
+      }
+
+      .watermark {
+        top: 8px;
+        right: 12px;
+        font-size: 11px;
+      }
+
+      .select-all-btn {
+        font-size: 13px;
+        padding: 8px 14px;
+      }
+
+      .category-header {
+        padding: 8px 12px;
+        font-size: 13px;
+      }
+
+      .sub-tag {
+        padding: 4px 10px;
+        font-size: 11px;
+      }
+
+      .key-point-item {
+        padding: 10px 12px;
+      }
+
+      .kp-title {
+        font-size: 12px;
+      }
+
+      .kp-content {
+        font-size: 11px;
+      }
+    }
+
+    @media (min-width: 769px) {
+      .bottom-nav {
+        display: none;
+      }
+    }
+
+    .bottom-nav {
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -503,9 +663,29 @@
     </div>
   </div>
 
+  <!-- 手机底部导航栏 -->
+  <div class="bottom-nav" id="bottomNav">
+    <button class="nav-btn active" id="navMap">
+      <span class="nav-icon">🗺️</span>
+      <span>地图</span>
+    </button>
+    <button class="nav-btn" id="navFilter">
+      <span class="nav-icon">🏷️</span>
+      <span>筛选</span>
+    </button>
+    <button class="nav-btn" id="navFlow">
+      <span class="nav-icon">📜</span>
+      <span>攻略</span>
+    </button>
+    <button class="nav-btn" id="navTips">
+      <span class="nav-icon">💡</span>
+      <span>要点</span>
+    </button>
+  </div>
+
   <div class="modal-overlay" id="modalOverlay">
     <div class="modal-content">
-      <button class="modal-close" id="modalClose">&times;</button>
+      <button class="modal-close" id="modalClose">✕</button>
       <div class="modal-title" id="modalTitle"></div>
       <div class="modal-body" id="modalBody"></div>
     </div>
@@ -1225,8 +1405,63 @@
       buildKeyPoints();
       updateMarkerVisibility();
       resetMapView();
-      
-      window.addEventListener('resize', resetMapView);
+
+      // 手机端导航栏逻辑
+      const bottomNav = document.getElementById('bottomNav');
+      const navMap = document.getElementById('navMap');
+      const navFilter = document.getElementById('navFilter');
+      const navFlow = document.getElementById('navFlow');
+      const navTips = document.getElementById('navTips');
+      const sidebar = document.getElementById('sidebar');
+      const sidebarSections = sidebar.querySelectorAll('.sidebar-section');
+
+      function isMobile() {
+        return window.innerWidth <= 768;
+      }
+
+      function setActiveNav(activeBtn) {
+        [navMap, navFilter, navFlow, navTips].forEach(btn => btn.classList.remove('active'));
+        activeBtn.classList.add('active');
+      }
+
+      function showSection(index) {
+        if (!isMobile()) return;
+        sidebar.classList.add('active');
+        // 滚动到指定区域
+        if (sidebarSections[index]) {
+          sidebarSections[index].scrollIntoView({ behavior: 'smooth' });
+        }
+      }
+
+      navMap.addEventListener('click', () => {
+        setActiveNav(navMap);
+        if (isMobile()) {
+          sidebar.classList.remove('active');
+        }
+      });
+
+      navFilter.addEventListener('click', () => {
+        setActiveNav(navFilter);
+        showSection(0);
+      });
+
+      navFlow.addEventListener('click', () => {
+        setActiveNav(navFlow);
+        showSection(1);
+      });
+
+      navTips.addEventListener('click', () => {
+        setActiveNav(navTips);
+        showSection(2);
+      });
+
+      // 窗口大小变化时处理
+      window.addEventListener('resize', () => {
+        resetMapView();
+        if (!isMobile()) {
+          sidebar.classList.remove('active');
+        }
+      });
     })();
   </script>
 </body>
